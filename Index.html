@@ -1,48 +1,87 @@
-function onFormSubmit(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-  var data = sheet.getDataRange().getValues();
-  
-  // 1. ดึงค่าจาก Event Object (e.namedValues จะแม่นยำกว่า e.values เพราะอิงตามหัวข้อคอลัมน์)
-  var responses = e.namedValues;
-  var timestamp = responses['Timestamp'] ? responses['Timestamp'][0] : "";
-  var userId    = responses['Line User ID'] ? responses['Line User ID'][0] : ""; // แก้ชื่อให้ตรงกับหัวคอลัมน์ใน Form
-  var name      = responses['ชื่อ-นามสกุล'] ? responses['ชื่อ-นามสกุล'][0] : "";
-  var email     = responses['อีเมล'] ? responses['อีเมล'][0] : "";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ลงทะเบียนสมาชิก</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+        .form-container { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+        h2 { color: #00b900; text-align: center; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #00b900; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        #loading { display:none; text-align: center; color: #666; }
+    </style>
+</head>
+<body>
 
-  var isDuplicate = false;
-  var reason = "";
-  var lastRow = sheet.getLastRow();
-
-  // 2. ตรวจสอบข้อมูลซ้ำ (วนลูปเช็คจากแถวที่ 2 จนถึงแถวก่อนหน้าแถวล่าสุด)
-  // เริ่มที่ i = 1 (แถวที่ 2) และจบที่ i < data.length - 1 (ไม่เช็คแถวตัวเอง)
-  for (var i = 1; i < data.length - 1; i++) {
-    if (userId && data[i][1] == userId) { isDuplicate = true; reason = "Line User ID นี้เคยลงทะเบียนแล้ว"; break; }
-    if (name && data[i][2] == name)     { isDuplicate = true; reason = "ชื่อ-นามสกุลนี้มีอยู่ในระบบแล้ว"; break; }
-    if (email && data[i][4] == email)   { isDuplicate = true; reason = "อีเมลนี้เคยใช้งานแล้ว"; break; }
-  }
-
-  // 3. จัดการผลลัพธ์
-  if (!isDuplicate) {
-    // --- กรณีข้อมูลใหม่: ส่งอีเมลยืนยัน ---
-    MailApp.sendEmail({
-      to: email,
-      subject: "ยืนยันการสมัครสมาชิกสำเร็จ",
-      body: "สวัสดีคุณ " + name + "\nระบบได้รับข้อมูลการสมัครของท่านเรียบร้อยแล้วเมื่อ " + timestamp
-    });
+<div class="form-container">
+    <h2>ลงทะเบียน</h2>
+    <div id="loading">กำลังเตรียมฟอร์ม...</div>
     
-    // (Optional) ส่ง LINE Notify ตรงนี้ได้เลย
-  } else {
-    // --- กรณีข้อมูลซ้ำ: ส่งแจ้งเตือนและลบแถวที่ซ้ำออก ---
-    MailApp.sendEmail({
-      to: email,
-      subject: "แจ้งเตือนการสมัครซ้ำ",
-      body: "ขออภัย คุณ " + name + "\nไม่สามารถสมัครได้เนื่องจาก: " + reason
-    });
+    <form id="regForm" style="display:none;">
+        <input type="hidden" id="userId" name="uid">
+        <label>ชื่อ-นามสกุล</label>
+        <input type="text" id="name" name="name" placeholder="นายไขยา บุญมา" required>
+        <label>เบอร์โทรศัพท์</label>
+        <input type="tel" id="tel" name="tel" placeholder="0655035666" required>
+        <label>อีเมล</label>
+        <input type="email" id="email" name="email" placeholder="chaiya@icc-coord.co.th" required>
+        
+        <p style="font-size: 12px; color: #666;">* ข้อมูลจะถูกเก็บตามนโยบายความเป็นส่วนตัว (PDPA)</p>
+        <button type="submit" id="submitBtn">ยืนยันการลงทะเบียน</button>
+    </form>
+</div>
 
-    // ลบแถวล่าสุดที่เพิ่งเพิ่มเข้ามา เพราะเป็นข้อมูลซ้ำ
-    sheet.deleteRow(lastRow);
-    
-    // บันทึก Log ไว้ดู (สร้าง Sheet ชื่อ 'Logs' เพิ่มถ้าต้องการ)
-    console.warn("พบข้อมูลซ้ำ: " + reason + " จาก " + email);
-  }
-}
+<script>
+    const scriptUrl = "URL_ของ_APPS_SCRIPT_ที่_DEPLOY_แล้ว";
+
+    async function main() {
+        try {
+            await liff.init({ liffId: "2008993053-zdStgsKn" });
+            if (!liff.isLoggedIn()) {
+                liff.login();
+            } else {
+                const profile = await liff.getProfile();
+                document.getElementById('userId').value = profile.userId;
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('regForm').style.display = 'block';
+            }
+        } catch (err) {
+            alert("LIFF Error: " + err.message);
+        }
+    }
+
+    document.getElementById('regForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.innerText = "กำลังบันทึก...";
+
+        const formData = new FormData(e.target);
+        const searchParams = new URLSearchParams(formData);
+
+        try {
+            const response = await fetch(scriptUrl + "?" + searchParams.toString(), { method: 'POST' });
+            const res = await response.json();
+            
+            if (res.result === "success") {
+                alert("ลงทะเบียนสำเร็จแล้ว!");
+                liff.closeWindow(); // ปิดหน้าต่าง LIFF
+            } else {
+                alert("เกิดข้อผิดพลาด: " + res.message);
+                btn.disabled = false;
+                btn.innerText = "ยืนยันการลงทะเบียน";
+            }
+        } catch (err) {
+            alert("ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่");
+            btn.disabled = false;
+        }
+    };
+
+    main();
+</script>
+</body>
+</html>
